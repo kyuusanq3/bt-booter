@@ -1,0 +1,26 @@
+<resources>
+    <string name="app_name">BT Booter</string>
+    <string name="read_dongle">Read Bluetooth dongle</string>
+    <string name="no_dongle">No USB Bluetooth dongle is plugged in.</string>
+    <string name="dongle_found">Found %1$s.</string>
+    <string name="asking_permission">Waiting for USB permission. Tap Allow on the prompt.</string>
+    <string name="permission_denied">USB permission was denied for %1$s.</string>
+    <string name="reading">Resetting the dongle and reading its details…</string>
+    <string name="read_ok">Dongle answered.</string>
+    <string name="read_failed">Could not read the dongle: %1$s</string>
+    <string name="installed_version">BT Booter %1$s</string>
+    <string name="scan_start">Scan for devices</string>
+    <string name="scan_stop">Stop scan</string>
+    <string name="scanning">Scanning for Bluetooth devices. Devices must be discoverable to show up.</string>
+    <string name="stopping_scan">Stopping the scan…</string>
+    <string name="scan_stopped">Scan stopped. Devices found: %1$d.</string>
+    <string name="scan_failed">Scan stopped with an error: %1$s</string>
+    <string name="devices_title">Discovered devices</string>
+    <string name="no_devices">No devices found yet. Tap Scan for devices.</string>
+    <string name="selected_device">Selected: %1$s</string>
+    <string name="no_selection">No device selected. Tap one in the list.</string>
+    <string name="unknown_name">(name not known yet)</string>
+    <string name="connect">Connect to selected device</string>
+    <string name="connect_ok">Connected, looked up services, and disconnected.</string>
+    <string name="connect_failed">Connection stopped: %1$s</string>
+</resources>
