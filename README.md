@@ -10,8 +10,13 @@ start-up, so the S10A's Android Auto can project to the T9E over Wi-Fi.
 ## Current step
 
 The app can claim a CSR8510, scan, pair, and run the hands-free plus Android Auto
-wireless-setup exchange with Carletter on the T9E. On the S10A the USB host must be in
-`host` mode, and the dongle must be reset once before the first HCI command.
+wireless-setup exchange with Carletter on the T9E. Hands-free is finished at `AT+CLIP`
+(blink never sends `AT+CMER`). The app then stays on the Android Auto channel, records
+the type 3 hotspot, and joins it. The TCP port and the gearhead launch are not in this
+version. On the S10A the USB host must be in `host` mode, and the dongle must be reset
+once before the first HCI command.
+
+Check for updates reads the latest GitHub release and installs `bt-booter.apk`.
 
 Head-unit findings from that work live in `C:/dev/proj/automd/headunit-bt-dongle.md`.
 

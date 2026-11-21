@@ -21,6 +21,18 @@
     <string name="no_selection">No device selected. Tap one in the list.</string>
     <string name="unknown_name">(name not known yet)</string>
     <string name="connect">Connect to selected device</string>
-    <string name="connect_ok">Connected, looked up services, and disconnected.</string>
+    <string name="connect_ok">Connection finished.</string>
     <string name="connect_failed">Connection stopped: %1$s</string>
+    <string name="check_for_updates">Check for updates</string>
+    <string name="update_checking">Checking GitHub for a newer version…</string>
+    <string name="update_up_to_date">This is the latest version.</string>
+    <string name="update_available">Version %1$s is available.</string>
+    <string name="update_check_failed">Could not check for updates.</string>
+    <string name="download_update">Download update</string>
+    <string name="install_update">Install update</string>
+    <string name="update_downloading">Downloading update…</string>
+    <string name="update_downloading_percent">Downloading update… %1$d%%</string>
+    <string name="update_ready">Update downloaded. Install it to finish.</string>
+    <string name="update_download_failed">Could not download the update.</string>
+    <string name="update_install_failed">Could not open the package installer.</string>
 </resources>

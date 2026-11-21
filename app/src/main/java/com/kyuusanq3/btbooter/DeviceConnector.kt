@@ -15,12 +15,14 @@ internal data class ConnectResult(val report: String, val error: String?)
 /**
  * Opens a link to one device, reads what it says about itself, pairs (or reuses a saved key), encrypts,
  * looks up its services over SDP, then connects hands-free as the phone would and looks up Android Auto
- * again while that is up. Opens Android Auto's RFCOMM channel if the device lists it, then disconnects.
+ * again while that is up. Opens Android Auto's RFCOMM channel if the device lists it, joins the hotspot
+ * from the car's Wi-Fi message, then disconnects.
  */
 internal class DeviceConnector(
     private val hci: UsbHciTransport,
     linkKeys: LinkKeyStore,
     private val onProgress: (String) -> Unit,
+    private val hotspotJoiner: HotspotJoiner = NoHotspotJoiner,
 ) : LinkWaiter {
     private val report = StringBuilder()
     private val pendingCommands = ArrayDeque<Pair<Int, ByteArray>>()
@@ -186,7 +188,7 @@ internal class DeviceConnector(
             val connected = runCatching {
                 waitFor("hands-free setup", HANDS_FREE_SETUP_TIMEOUT_MS) { gateway.serviceLevelConnected.takeIf { it } }
             }.isSuccess
-            line("Hands-free", if (connected) "set up (the device turned on indicator reports)" else "setup did not finish")
+            line("Hands-free", if (connected) "set up (the car finished its hands-free commands)" else "setup did not finish")
             pump(AFTER_SETUP_MS)
             val androidAuto = lookUpAndroidAutoWhileConnected()
             if (androidAuto != null) optional("Android Auto channel") { listenToAndroidAuto(mux, androidAuto) }
@@ -223,7 +225,9 @@ internal class DeviceConnector(
         val got = runCatching {
             waitFor("the car's Wi-Fi details", ANDROID_AUTO_LISTEN_MS) { setup.credentials }
         }.isSuccess
-        if (!got) {
+        if (got) {
+            joinHotspot(setup)
+        } else {
             line(
                 "Android Auto",
                 if (setup.messagesReceived == 0) "nothing received in ${ANDROID_AUTO_LISTEN_MS / 1000} s"
@@ -232,6 +236,36 @@ internal class DeviceConnector(
         }
         pump(AFTER_CREDENTIALS_MS)
         mux.close(dlc)
+    }
+
+    /**
+     * The type 3 message carries the hotspot only. The TCP port arrives in a type 1 message this car
+     * did not send, and the gearhead launch for a remote socket was never captured, so both stay out.
+     */
+    private fun joinHotspot(setup: WirelessSetup) {
+        val credentials = setup.credentials ?: return
+        onProgress("Joining ${credentials.ssid ?: "the car hotspot"}. Accept the Wi-Fi prompt if one appears.")
+        hotspotJoiner.start(credentials)
+        val detail = try {
+            waitFor("the hotspot join", HOTSPOT_JOIN_MS) { hotspotJoiner.result() }
+        } catch (error: Exception) {
+            val pending = hotspotJoiner.result()
+            if (disconnectReason != null) {
+                hotspotJoiner.cancel()
+                line("Wi-Fi", pending ?: "hotspot join stopped: ${error.message}")
+                throw error
+            }
+            pending ?: "hotspot join did not finish: ${error.message}"
+        }
+        hotspotJoiner.cancel()
+        line("Wi-Fi", detail)
+        val start = setup.start
+        val offered = start?.ipAddress?.let { ip -> start.port?.let { port -> "$ip:$port" } }
+        line(
+            "Android Auto",
+            if (offered != null) "car offered $offered. This version stops after the hotspot join."
+            else "the Wi-Fi message had no TCP port. This version stops after the hotspot join.",
+        )
     }
 
     private fun <T> withSdp(block: (SdpClient) -> T): T {
@@ -342,7 +376,8 @@ internal class DeviceConnector(
         const val ANDROID_AUTO_RETRIES = 3
         const val ANDROID_AUTO_RETRY_MS = 5_000L
         const val ANDROID_AUTO_LISTEN_MS = 45_000L
-        const val AFTER_CREDENTIALS_MS = 5_000L
+        const val HOTSPOT_JOIN_MS = 30_000L
+        const val AFTER_CREDENTIALS_MS = 10_000L
         const val POLL_MS = 250L
     }
 }

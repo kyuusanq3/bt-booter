@@ -1,21 +1,29 @@
 package com.kyuusanq3.btbooter
 
+import android.Manifest
 import android.app.Activity
 import android.app.PendingIntent
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
+import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.ToggleButton
+import java.io.File
 import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
@@ -26,6 +34,9 @@ class MainActivity : Activity() {
     private lateinit var readButton: Button
     private lateinit var scanToggle: ToggleButton
     private lateinit var connectButton: Button
+    private lateinit var updates: AppUpdateClient
+    private lateinit var updateStatus: TextView
+    private lateinit var updateAction: Button
     private lateinit var selectedLabel: TextView
     private lateinit var deviceList: ListView
     private lateinit var deviceAdapter: ArrayAdapter<String>
@@ -35,6 +46,9 @@ class MainActivity : Activity() {
     private var afterPermission: ((UsbDevice) -> Unit)? = null
     private var busy = false
     private var connectAfterScan = false
+    private var downloadedApk: File? = null
+    private var afterWifiPermission: (() -> Unit)? = null
+    private val hotspotJoiner by lazy { WifiHotspotJoiner(this) }
 
     @Volatile
     private var scanning = false
@@ -105,8 +119,13 @@ class MainActivity : Activity() {
         connectButton = findViewById(R.id.connect_button)
         selectedLabel = findViewById(R.id.selected_device)
         deviceList = findViewById(R.id.device_list)
+        updates = AppUpdateClient(this)
+        updateStatus = findViewById(R.id.update_status)
+        updateAction = findViewById(R.id.update_action_button)
         findViewById<TextView>(R.id.version_label).text =
             getString(R.string.installed_version, BuildConfig.VERSION_NAME)
+        findViewById<Button>(R.id.check_update_button).setOnClickListener { checkForUpdate() }
+        updateAction.setOnClickListener { onUpdateAction() }
 
         deviceAdapter = ArrayAdapter(this, R.layout.device_row)
         deviceList.adapter = deviceAdapter
@@ -198,6 +217,16 @@ class MainActivity : Activity() {
             return
         }
         if (busy) return note("Connect skipped: busy")
+        if (!hasWifiPermission()) {
+            afterWifiPermission = { startConnect() }
+            requestPermissions(wifiPermissions(), REQUEST_WIFI)
+            return
+        }
+        startConnect()
+    }
+
+    private fun startConnect() {
+        if (busy) return note("Connect skipped: busy")
         val address = selectedAddress ?: return note("Connect skipped: no device selected")
         val seen = devices.firstOrNull { it.address == address }
         val target = ConnectTarget(
@@ -218,9 +247,9 @@ class MainActivity : Activity() {
         io.execute {
             val result = runCatching {
                 UsbHciTransport.open(usbManager, device).use { hci ->
-                    DeviceConnector(hci, linkKeys) { message ->
+                    DeviceConnector(hci, linkKeys, { message ->
                         runOnUiThread { if (!destroyed) status.text = message }
-                    }.run(target)
+                    }, hotspotJoiner).run(target)
                 }
             }.getOrElse { ConnectResult(report = "", error = it.message ?: it.javaClass.simpleName) }
             Log.i(TAG, "Connect result:\n${result.report}\nerror=${result.error}")
@@ -382,6 +411,137 @@ class MainActivity : Activity() {
         return "${device.name ?: getString(R.string.unknown_name)}\n$details"
     }
 
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_WIFI) return
+        val action = afterWifiPermission
+        afterWifiPermission = null
+        action?.invoke()
+    }
+
+    private fun hasWifiPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
+        return wifiPermissions().any { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+    }
+
+    private fun wifiPermissions(): Array<String> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES, Manifest.permission.ACCESS_FINE_LOCATION)
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+
+    private fun checkForUpdate() {
+        if (busy) return
+        busy = true
+        downloadedApk = null
+        updateAction.visibility = View.GONE
+        updateStatus.setText(R.string.update_checking)
+        io.execute {
+            val result = try {
+                Result.success(updates.checkForUpdate())
+            } catch (error: Exception) {
+                logUpdateFailure("Failed to check for update", error)
+                Result.failure(error)
+            }
+            runOnUiThread {
+                if (destroyed) return@runOnUiThread
+                busy = false
+                result.fold(
+                    onSuccess = { check ->
+                        when (check) {
+                            UpdateCheck.UpToDate -> updateStatus.setText(R.string.update_up_to_date)
+                            is UpdateCheck.Available -> {
+                                updateStatus.text = getString(R.string.update_available, check.versionName)
+                                updateAction.setText(R.string.download_update)
+                                updateAction.tag = ACTION_DOWNLOAD
+                                updateAction.visibility = View.VISIBLE
+                            }
+                        }
+                    },
+                    onFailure = { updateStatus.setText(R.string.update_check_failed) },
+                )
+            }
+        }
+    }
+
+    private fun onUpdateAction() {
+        if (busy) return
+        when (updateAction.tag) {
+            ACTION_DOWNLOAD -> downloadUpdate()
+            ACTION_INSTALL -> downloadedApk?.let { launchApkInstall(it) }
+        }
+    }
+
+    private fun downloadUpdate() {
+        busy = true
+        updateStatus.setText(R.string.update_downloading)
+        io.execute {
+            val result = try {
+                Result.success(
+                    updates.downloadApk { percent ->
+                        runOnUiThread {
+                            if (!destroyed) {
+                                updateStatus.text = getString(R.string.update_downloading_percent, percent)
+                            }
+                        }
+                    },
+                )
+            } catch (error: Exception) {
+                logUpdateFailure("Failed to download APK", error)
+                Result.failure(error)
+            }
+            runOnUiThread {
+                if (destroyed) return@runOnUiThread
+                busy = false
+                result.fold(
+                    onSuccess = { file ->
+                        downloadedApk = file
+                        updateStatus.setText(R.string.update_ready)
+                        updateAction.setText(R.string.install_update)
+                        updateAction.tag = ACTION_INSTALL
+                        updateAction.visibility = View.VISIBLE
+                    },
+                    onFailure = {
+                        updateStatus.setText(R.string.update_download_failed)
+                        updateAction.visibility = View.GONE
+                    },
+                )
+            }
+        }
+    }
+
+    private fun launchApkInstall(apkFile: File) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                        data = Uri.parse("package:$packageName")
+                    },
+                )
+            } catch (_: ActivityNotFoundException) {
+                updateStatus.setText(R.string.update_install_failed)
+            }
+            return
+        }
+        val uri = UpdateApkProvider.apkUri()
+        try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    clipData = ClipData.newRawUri(apkFile.name, uri)
+                },
+            )
+        } catch (_: ActivityNotFoundException) {
+            updateStatus.setText(R.string.update_install_failed)
+        }
+    }
+
     /** Logs [text] and appends it to the last-connect file, which outlives the T9E's small log buffer. */
     private fun note(text: String) {
         Log.i(TAG, text)
@@ -408,5 +568,8 @@ class MainActivity : Activity() {
         private const val KEY_SELECTED_ADDRESS = "selected_address"
         private const val KEY_SELECTED_NAME = "selected_name"
         private const val DEFAULT_PAGE_SCAN_REPETITION_MODE = 1
+        private const val REQUEST_WIFI = 1
+        private const val ACTION_DOWNLOAD = "download"
+        private const val ACTION_INSTALL = "install"
     }
 }

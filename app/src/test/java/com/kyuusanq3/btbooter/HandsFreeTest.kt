@@ -79,6 +79,8 @@ class HandsFreeTest {
         assertEquals(listOf("+BRSF: 4079") to true, gateway.answer("AT+BRSF=127"))
         assertTrue(gateway.answer("AT+CIND=?").first.single().startsWith("+CIND: (\"call\""))
         assertFalse(gateway.serviceLevelConnected)
+        assertEquals(emptyList<String>() to true, gateway.answer("AT+CLIP=1"))
+        assertTrue(gateway.serviceLevelConnected)
         assertEquals(emptyList<String>() to true, gateway.answer("AT+CMER=3,0,0,1"))
         assertTrue(gateway.serviceLevelConnected)
         assertEquals(listOf("+CHLD: (0,1,1x,2,2x,3)") to true, gateway.answer("AT+CHLD=?"))
@@ -96,7 +98,7 @@ class HandsFreeTest {
         setup.onData(start.copyOfRange(0, 9))
         setup.onData(start.copyOfRange(9, start.size))
         assertEquals(WirelessStart("192.168.43.1", 37853, 1), setup.start)
-        assertEquals(listOf("00060005" + "0a00" + "1000" + "1800", "00000007"), sent.drop(1))
+        assertEquals(listOf("00060002000100070000"), sent)
 
         setup.onData(
             hex(
@@ -107,7 +109,27 @@ class HandsFreeTest {
             WirelessCredentials("carletter_368b", "12345678", "B2:40:4E:0D:E3:6E", 8, 1),
             setup.credentials,
         )
+        val join = hotspotRequest(setup.credentials!!)
+        assertEquals("carletter_368b", join?.ssid)
+        assertEquals("12345678", join?.passphrase)
+        assertEquals(HotspotKey.WPA2, join?.key)
         assertEquals(3, setup.messagesReceived)
+    }
+
+    @Test
+    fun hotspotKeyTreatsTheCapturedModeAsWpa2AndSkipsWep() {
+        assertEquals(HotspotKey.WPA2, hotspotKey(8, "12345678"))
+        assertEquals(HotspotKey.OPEN, hotspotKey(1, "12345678"))
+        assertEquals(HotspotKey.OPEN, hotspotKey(8, ""))
+        assertEquals(HotspotKey.WEP, hotspotKey(2, "12345"))
+        assertEquals(null, hotspotRequest(WirelessCredentials(null, "12345678", null, 8, 1)))
+    }
+
+    @Test
+    fun versionCompareIgnoresALeadingV() {
+        assertTrue(isNewerVersion("v0.2.0", "0.1.0"))
+        assertFalse(isNewerVersion("0.2.0", "0.2.0"))
+        assertFalse(isNewerVersion("v0.1.0", "0.2.0"))
     }
 
     private fun hex(text: String): ByteArray = ByteArray(text.length / 2) { text.substring(2 * it, 2 * it + 2).toInt(16).toByte() }

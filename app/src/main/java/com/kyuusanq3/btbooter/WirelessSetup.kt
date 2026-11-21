@@ -15,8 +15,9 @@ internal data class WirelessStart(val ipAddress: String?, val port: Int?, val re
 
 /**
  * The phone's side of Android Auto wireless setup over RFCOMM (`wifi_discovery` messages, each framed as
- * 2-byte length, 2-byte type, protobuf body, big-endian). The car asks for a version, says where its
- * Android Auto server listens, then hands over its hotspot details when asked.
+ * 2-byte length, 2-byte type, protobuf body, big-endian). The car asks for a version, then pushes its
+ * hotspot. This car does that without a start request. The start-response and info-request type numbers
+ * are still guesses, so those replies are not sent.
  */
 internal class WirelessSetup(
     private val send: (ByteArray) -> Unit,
@@ -63,12 +64,6 @@ internal class WirelessSetup(
                 val request = WirelessStart(fields.string(1), fields.int(2), fields.int(3))
                 start = request
                 line("Android Auto", "start request: server ${request.ipAddress}:${request.port} (reason ${request.reason})")
-                sendMessage(
-                    TYPE_START_RESPONSE,
-                    Protobuf.string(1, "") + Protobuf.varint(2, 0) + Protobuf.varint(3, STATUS_SUCCESS),
-                )
-                sendMessage(TYPE_INFO_REQUEST, ByteArray(0))
-                line("Android Auto", "sent start response (success) and Wi-Fi info request")
             }
             TYPE_INFO_RESPONSE -> {
                 val info = WirelessCredentials(
@@ -100,7 +95,6 @@ internal class WirelessSetup(
         const val TYPE_START_RESPONSE = 5
         const val TYPE_CONNECT_STATUS = 6
         const val TYPE_INFO_REQUEST = 7
-        const val STATUS_SUCCESS = 0L
     }
 }
 

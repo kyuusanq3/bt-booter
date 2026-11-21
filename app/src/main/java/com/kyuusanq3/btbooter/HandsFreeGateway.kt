@@ -7,7 +7,10 @@ package com.kyuusanq3.btbooter
 internal class HandsFreeGateway(private val line: (String, String) -> Unit) {
     var dlc: RfcommMux.Dlc? = null
 
-    /** True once the car has enabled indicator reporting (AT+CMER), which completes setup. */
+    /**
+     * True once the car has finished hands-free setup. Blink on the T9E stops at AT+CLIP and never
+     * sends AT+CMER; either command counts, because that is when it registers the Android Auto channel.
+     */
     var serviceLevelConnected = false
         private set
 
@@ -39,7 +42,7 @@ internal class HandsFreeGateway(private val line: (String, String) -> Unit) {
             upper.startsWith("AT+BRSF=") -> listOf("+BRSF: $GATEWAY_FEATURES") to true
             upper == "AT+CIND=?" -> listOf(INDICATOR_RANGES) to true
             upper == "AT+CIND?" -> listOf(INDICATOR_VALUES) to true
-            upper.startsWith("AT+CMER=") -> {
+            upper.startsWith("AT+CMER=") || upper.startsWith("AT+CLIP") -> {
                 serviceLevelConnected = true
                 emptyList<String>() to true
             }
@@ -67,7 +70,7 @@ internal class HandsFreeGateway(private val line: (String, String) -> Unit) {
         const val REVISION = "0.1"
         const val OPERATOR = "BT Booter"
         val ACCEPTED_PREFIXES = listOf(
-            "AT+NREC", "AT+CLIP", "AT+CCWA", "AT+CMEE", "AT+VGS", "AT+VGM", "AT+BIA", "AT+COPS=", "AT+CSCS=",
+            "AT+NREC", "AT+CCWA", "AT+CMEE", "AT+VGS", "AT+VGM", "AT+BIA", "AT+COPS=", "AT+CSCS=",
             "AT+BAC", "AT+XAPL", "AT+IPHONEACCEV", "AT+CSRSF",
         )
     }
